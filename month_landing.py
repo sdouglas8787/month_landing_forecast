@@ -336,7 +336,74 @@ def daily_table(actuals, y, m, today_wd):
           f"{today_wd}: actuals to {cut}, forecast beyond, weekday-weighted.")
 
 
+def month_chart(actuals, y, m, today_wd):
+    """The in-month view: daily forecast and actual bars by working day,
+    cumulative lines on the secondary axis, dotted where not yet final."""
+    wds = working_days(y, m)
+    n = len(wds)
+    # blue bars: the pre-month plan per weighted day up to today (so actual
+    # vs plan is visible), the live blend-remaining forecast beyond it
+    plan = np.zeros(n)
+    for u in UNITS:
+        w = weekday_weights(actuals, u, y, m)
+        ww = np.array([w[d.weekday()] for d in wds])
+        plan += pre_month(actuals, u, y, m) * ww / ww.sum()
+    land = sum(landing(actuals, u, y, m, today_wd)[0] for u in UNITS)
+    actual = np.array([sum(actuals[u][d] for u in UNITS) for d in wds[:today_wd]])
+    rem_share = plan[today_wd:] / plan[today_wd:].sum()
+    live = (land - actual.sum()) * rem_share
+    fc_bars = np.concatenate([plan[:today_wd], live])
+
+    fig, ax = plt.subplots(figsize=(8.6, 4.4), dpi=150)
+    fig.patch.set_facecolor(BG)
+    ax.set_facecolor(BG)
+    xs = np.arange(n)
+    ax.bar(xs - 0.21, fc_bars, width=0.4, color=INK, label="Forecast")
+    ax.bar(xs[:today_wd] + 0.21, actual, width=0.4, color=SECOND, label="Actual")
+    ax.axvline(today_wd - 0.5, color=MUTED, linewidth=0.9, linestyle=":")
+    ax.text(today_wd - 0.4, ax.get_ylim()[1] * 0.97, "today", fontsize=8,
+            color=MUTED, va="top")
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    ax.set_xticks(xs)
+    ax.set_xticklabels([f"{d.day}\n{d.strftime('%a')[0]}" for d in wds],
+                       fontsize=6.5, color=MUTED)
+    ax.tick_params(colors=MUTED, labelsize=8)
+    ax.set_ylabel("Daily, GBPk", fontsize=8, color=MUTED)
+
+    ax2 = ax.twinx()
+    ax2.spines["top"].set_visible(False)
+    cum_plan = np.cumsum(plan)
+    cum_act = np.cumsum(actual)
+    cum_live = np.concatenate([cum_act, cum_act[-1] + np.cumsum(live)])
+    ax2.plot(xs, cum_plan, color=INK, linewidth=1.4, alpha=0.8)
+    ax2.plot(xs[:today_wd], cum_act, color=SECOND, linewidth=1.8)
+    ax2.plot(xs[today_wd - 1:], cum_live[today_wd - 1:], color=SECOND,
+             linewidth=1.8, linestyle=":")
+    ax2.annotate(f"Landing {cum_live[-1]:,.0f}", xy=(n - 1, cum_live[-1]),
+                 xytext=(-8, 10), textcoords="offset points", ha="right",
+                 fontsize=8.5, color=SECOND, fontweight="bold")
+    ax2.annotate(f"Plan {cum_plan[-1]:,.0f}", xy=(n - 1, cum_plan[-1]),
+                 xytext=(-8, -14), textcoords="offset points", ha="right",
+                 fontsize=8.5, color=INK, fontweight="bold")
+    ax2.set_ylabel("Cumulative, GBPk", fontsize=8, color=MUTED)
+    ax2.tick_params(colors=MUTED, labelsize=8)
+
+    ax.set_title(f"{date(y, m, 1):%B %Y}: forecast vs actual by working day, "
+                 f"as at working day {today_wd}",
+                 loc="left", fontsize=11, color=INK, fontweight="bold", pad=10)
+    ax.legend(loc="upper left", frameon=False, fontsize=8)
+    fig.text(0.01, 0.015, "Bars: daily forecast (plan to today, live blend "
+             "beyond) and actuals. Lines: cumulative, dotted where not final.",
+             fontsize=7, color=MUTED)
+    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    fig.savefig("outputs/month_view.png", facecolor=BG)
+    plt.close(fig)
+    print("Month view chart written: outputs/month_view.png")
+
+
 if __name__ == "__main__":
     actuals = generate()
     report(backtest(actuals))
     daily_table(actuals, 2026, 10, 12)
+    month_chart(actuals, 2026, 10, 12)

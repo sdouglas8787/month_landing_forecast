@@ -81,6 +81,16 @@ correction chasing its own tail.
 This is also not a demand model. It forecasts where the month lands given
 how it is pacing; it says nothing about why.
 
+## The month view
+
+![Month view](outputs/month_view.png)
+
+The operational picture: daily forecast and actual bars by working day,
+cumulative lines on the secondary axis, and the cumulative line drawn
+dotted from today onward because those numbers are not final yet. In the
+sample month the pace is running ahead of plan and the landing is called
+up accordingly - the strong month not under-called, drawn.
+
 ## The daily table
 
 `outputs/daily_table_sample.csv` reproduces the working layout this method
