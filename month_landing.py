@@ -358,10 +358,13 @@ def month_chart(actuals, y, m, today_wd):
     fig.patch.set_facecolor(BG)
     ax.set_facecolor(BG)
     xs = np.arange(n)
-    ax.bar(xs - 0.21, fc_bars, width=0.4, color=INK, label="Forecast")
+    ax.bar(xs - 0.21, fc_bars, width=0.4, color=INK, label="Budget / forecast")
     ax.bar(xs[:today_wd] + 0.21, actual, width=0.4, color=SECOND, label="Actual")
+    # bars compressed into the lower half so the cumulative lines read clearly
+    bar_top = float(max(fc_bars.max(), actual.max())) * 2.4
+    ax.set_ylim(0, bar_top)
     ax.axvline(today_wd - 0.5, color=MUTED, linewidth=0.9, linestyle=":")
-    ax.text(today_wd - 0.4, ax.get_ylim()[1] * 0.97, "today", fontsize=8,
+    ax.text(today_wd - 0.4, bar_top * 0.97, "today", fontsize=8,
             color=MUTED, va="top")
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
@@ -380,12 +383,20 @@ def month_chart(actuals, y, m, today_wd):
     ax2.plot(xs[:today_wd], cum_act, color=SECOND, linewidth=1.8)
     ax2.plot(xs[today_wd - 1:], cum_live[today_wd - 1:], color=SECOND,
              linewidth=1.8, linestyle=":")
-    ax2.annotate(f"Landing {cum_live[-1]:,.0f}", xy=(n - 1, cum_live[-1]),
-                 xytext=(-8, 10), textcoords="offset points", ha="right",
-                 fontsize=8.5, color=SECOND, fontweight="bold")
-    ax2.annotate(f"Plan {cum_plan[-1]:,.0f}", xy=(n - 1, cum_plan[-1]),
-                 xytext=(-8, -14), textcoords="offset points", ha="right",
-                 fontsize=8.5, color=INK, fontweight="bold")
+    box = dict(facecolor="white", alpha=0.75, edgecolor="none",
+               boxstyle="round,pad=0.25")
+    hi = cum_live[-1] >= cum_plan[-1]
+    var = cum_live[-1] / cum_plan[-1] - 1
+    ax2.annotate(f"Landing {cum_live[-1]:,.0f}  ({var:+.1%} vs budget)",
+                 xy=(n - 1, cum_live[-1]),
+                 xytext=(-10, 12 if hi else -46), textcoords="offset points",
+                 ha="right", fontsize=8.5, color=SECOND, fontweight="bold",
+                 bbox=box)
+    ax2.annotate(f"Budget {cum_plan[-1]:,.0f}", xy=(n - 1, cum_plan[-1]),
+                 xytext=(-10, -46 if hi else 12), textcoords="offset points",
+                 ha="right", fontsize=8.5, color=INK, fontweight="bold",
+                 bbox=box)
+    ax2.set_ylim(0, float(max(cum_live[-1], cum_plan[-1])) * 1.18)
     ax2.set_ylabel("Cumulative, GBPk", fontsize=8, color=MUTED)
     ax2.tick_params(colors=MUTED, labelsize=8)
 
@@ -393,8 +404,8 @@ def month_chart(actuals, y, m, today_wd):
                  f"as at working day {today_wd}",
                  loc="left", fontsize=11, color=INK, fontweight="bold", pad=10)
     ax.legend(loc="upper left", frameon=False, fontsize=8)
-    fig.text(0.01, 0.015, "Bars: daily forecast (plan to today, live blend "
-             "beyond) and actuals. Lines: cumulative, dotted where not final.",
+    fig.text(0.01, 0.015, "Bars: daily budget to today, live forecast beyond; "
+             "actuals in red. Lines: cumulative, dotted where not final.",
              fontsize=7, color=MUTED)
     fig.tight_layout(rect=(0, 0.04, 1, 1))
     fig.savefig("outputs/month_view.png", facecolor=BG)

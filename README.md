@@ -33,7 +33,8 @@ weighted by how much of the month has been seen.
    the rate per weighted day, then priced by the month's own composition:
    how many of which weekdays actually fall in it, net of holidays. Two
    Februaries with the same seasonality can still differ, and this is
-   where the difference lives.
+   where the difference lives. In the original this pre-month number was
+   the budget, and the month view reads ahead-or-behind against it.
 3. **The pacing curve.** From the trailing six completed months, the
    cumulative share of a month normally landed by each point in it - with
    "point in it" measured in weighted days, not elapsed days. Months load
@@ -51,7 +52,7 @@ weighted by how much of the month has been seen.
 Walk-forward over 34 synthetic months (2024-01 to 2026-10), every working
 day, all units summed. Median absolute percentage error by point in month:
 
-| Elapsed | Blend | Pacing alone | Run-rate | Held forecast |
+| Elapsed | Blend | Pacing alone | Run-rate | Held budget |
 |---|---|---|---|---|
 | 20% | 3.7% | 7.2% | 11.5% | 4.7% |
 | 40% | 3.4% | 5.8% | 8.6% | 4.9% |
@@ -85,11 +86,14 @@ how it is pacing; it says nothing about why.
 
 ![Month view](outputs/month_view.png)
 
-The operational picture: daily forecast and actual bars by working day,
-cumulative lines on the secondary axis, and the cumulative line drawn
-dotted from today onward because those numbers are not final yet. In the
-sample month the pace is running ahead of plan and the landing is called
-up accordingly - the strong month not under-called, drawn.
+The operational picture, and the question it exists to answer: ahead of
+budget, or behind? Daily budget and actual bars by working day, cumulative
+lines on the secondary axis, the cumulative line drawn dotted from today
+onward because those numbers are not final yet, and the landing labelled
+with its variance to budget. Actuals and forecast combine into one
+reading: in the sample month the pace is running ahead and the landing is
+called up to +2.1% against budget - the strong month not under-called,
+drawn.
 
 ## The daily table
 
