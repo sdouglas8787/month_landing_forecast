@@ -87,10 +87,12 @@ how it is pacing; it says nothing about why.
 ![Month view](outputs/month_view.png)
 
 The operational picture, and the question it exists to answer: ahead of
-budget, or behind? Daily budget and actual bars by working day, cumulative
-lines on the secondary axis, the cumulative line drawn dotted from today
-onward because those numbers are not final yet, and the landing labelled
-with its variance to budget. Actuals and forecast combine into one
+budget, or behind? Blue bars carry the daily budget for the whole month;
+red carries the live story - solid actuals to today, dotted-outline
+forecast bars beyond, so you can see where the variance is forming day by
+day. Cumulative lines ride the secondary axis, dotted from today onward
+because those numbers are not final yet, and the landing is labelled with
+its variance to budget. Actuals and forecast combine into one
 reading: in the sample month the pace is running ahead and the landing is
 called up to +2.1% against budget - the strong month not under-called,
 drawn.

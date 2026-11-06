@@ -352,16 +352,22 @@ def month_chart(actuals, y, m, today_wd):
     actual = np.array([sum(actuals[u][d] for u in UNITS) for d in wds[:today_wd]])
     rem_share = plan[today_wd:] / plan[today_wd:].sum()
     live = (land - actual.sum()) * rem_share
-    fc_bars = np.concatenate([plan[:today_wd], live])
 
     fig, ax = plt.subplots(figsize=(8.6, 4.4), dpi=150)
     fig.patch.set_facecolor(BG)
     ax.set_facecolor(BG)
     xs = np.arange(n)
-    ax.bar(xs - 0.21, fc_bars, width=0.4, color=INK, label="Budget / forecast")
-    ax.bar(xs[:today_wd] + 0.21, actual, width=0.4, color=SECOND, label="Actual")
+    ax.bar(xs - 0.21, plan, width=0.4, color=INK)
+    ax.bar(xs[:today_wd] + 0.21, actual, width=0.4, color=SECOND)
+    ax.bar(xs[today_wd:] + 0.21, live, width=0.4, facecolor="none",
+           edgecolor=SECOND, linewidth=1.1, linestyle=(0, (2, 2)))
+    from matplotlib.patches import Patch
+    handles = [Patch(facecolor=INK, label="Budget"),
+               Patch(facecolor=SECOND, label="Actual"),
+               Patch(facecolor="none", edgecolor=SECOND, linewidth=1.1,
+                     linestyle=(0, (2, 2)), label="Forecast")]
     # bars compressed into the lower half so the cumulative lines read clearly
-    bar_top = float(max(fc_bars.max(), actual.max())) * 2.4
+    bar_top = float(max(plan.max(), actual.max(), live.max())) * 2.4
     ax.set_ylim(0, bar_top)
     ax.axvline(today_wd - 0.5, color=MUTED, linewidth=0.9, linestyle=":")
     ax.text(today_wd - 0.4, bar_top * 0.97, "today", fontsize=8,
@@ -403,10 +409,10 @@ def month_chart(actuals, y, m, today_wd):
     ax.set_title(f"{date(y, m, 1):%B %Y}: forecast vs actual by working day, "
                  f"as at working day {today_wd}",
                  loc="left", fontsize=11, color=INK, fontweight="bold", pad=10)
-    ax.legend(loc="upper left", frameon=False, fontsize=8)
-    fig.text(0.01, 0.015, "Bars: daily budget to today, live forecast beyond; "
-             "actuals in red. Lines: cumulative, dotted where not final.",
-             fontsize=7, color=MUTED)
+    ax.legend(handles=handles, loc="upper left", frameon=False, fontsize=8)
+    fig.text(0.01, 0.015, "Blue bars: daily budget, all month. Red: actuals "
+             "to today, live forecast beyond (dotted outline). Lines: "
+             "cumulative, dotted where not final.", fontsize=7, color=MUTED)
     fig.tight_layout(rect=(0, 0.04, 1, 1))
     fig.savefig("outputs/month_view.png", facecolor=BG)
     plt.close(fig)
