@@ -236,15 +236,28 @@ def report(rows):
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
     xs = range(len(funnel))
-    for key, colour, label in (("prior", MUTED, "Pre-month forecast, held"),
-                               ("runrate", SECOND, "Naive run-rate"),
-                               ("profiled", THIRD, "Pacing alone"),
-                               ("blend", ACCENT, "Blend")):
+    series = (("prior", MUTED, "Budget, held"),
+              ("runrate", SECOND, "Naive run-rate"),
+              ("profiled", THIRD, "Pacing alone"),
+              ("blend", ACCENT, "Blend"))
+    ends = []
+    for key, colour, label in series:
         ys = [f[key] for f in funnel]
         ax.plot(xs, ys, color=colour, linewidth=1.8)
-        ax.annotate(f"{label} {ys[-1]:.1f}%", xy=(len(funnel) - 1, ys[-1]),
-                    xytext=(6, 0), textcoords="offset points", va="center",
-                    fontsize=8.5, color=colour, fontweight="bold")
+        ends.append([label, colour, ys[-1]])
+    # staggered end labels: stack downward with a minimum gap so the lines
+    # that converge near zero do not write over each other
+    top = max(e[2] for e in ends)
+    gap = max(top, 1.0) * 0.12
+    pos = None
+    box = dict(facecolor="white", alpha=0.75, edgecolor="none",
+               boxstyle="round,pad=0.2")
+    for label, colour, val in sorted(ends, key=lambda e: -e[2]):
+        y = val if pos is None else min(val, pos - gap)
+        pos = y
+        ax.annotate(f"{label} {val:.1f}%", xy=(len(funnel) - 1, val),
+                    xytext=(len(funnel) - 0.82, y), va="center",
+                    fontsize=8.5, color=colour, fontweight="bold", bbox=box)
     ax.set_xticks(list(xs))
     ax.set_xticklabels([f["elapsed"] for f in funnel], fontsize=8)
     ax.set_xlim(-0.5, len(funnel) * 1.35)
