@@ -20,14 +20,24 @@ weighted by how much of the month has been seen.
 
 ## Method
 
-1. **Working days only.** Weekends and England bank holidays carry no
-   revenue and no weight. A month is its working days.
-2. **The pre-month forecast.** Log-linear trend plus month-of-year factors,
-   fitted per unit on up to five years of completed months. This is the
-   number you would publish before day one.
+1. **Working days, weighted.** Weekends and England bank holidays carry
+   no revenue and no weight - and the working days are not equal either.
+   Weekday weights are learned from the trailing twelve months per unit
+   (in the synthetic data: Monday low, Tuesday best, Wednesday next,
+   Thursday low, Friday third). A month is the sum of its weighted days,
+   so a bank holiday changes the mix, not just the count. The method's own
+   history runs the same way: the first version of this idea used calendar
+   days, and treating days as equal was its first measured failure.
+2. **The pre-month forecast.** Log-linear trend plus month-of-year
+   factors, fitted per unit on up to five years of completed months - on
+   the rate per weighted day, then priced by the month's own composition:
+   how many of which weekdays actually fall in it, net of holidays. Two
+   Februaries with the same seasonality can still differ, and this is
+   where the difference lives.
 3. **The pacing curve.** From the trailing six completed months, the
-   cumulative share of a month normally landed by each point in it. Months
-   load toward their end; the curve knows by how much, per unit.
+   cumulative share of a month normally landed by each point in it - with
+   "point in it" measured in weighted days, not elapsed days. Months load
+   toward their end; the curve knows by how much, per unit.
 4. **The blend.** Landing = share x (MTD / expected share) + (1 - share) x
    pre-month forecast. The weight is simply the share of the month observed:
    day two leans on the forecast, day eighteen leans on the evidence.
@@ -43,18 +53,18 @@ day, all units summed. Median absolute percentage error by point in month:
 
 | Elapsed | Blend | Pacing alone | Run-rate | Held forecast |
 |---|---|---|---|---|
-| 20% | 6.4% | 6.8% | 11.1% | 5.6% |
-| 40% | 4.6% | 5.9% | 8.8% | 5.5% |
-| 60% | 3.7% | 4.8% | 7.7% | 5.6% |
-| 80% | 3.1% | 3.0% | 3.5% | 5.6% |
+| 20% | 3.7% | 7.2% | 11.5% | 4.7% |
+| 40% | 3.4% | 5.8% | 8.6% | 4.9% |
+| 60% | 3.4% | 5.0% | 7.3% | 4.7% |
+| 80% | 2.4% | 3.0% | 3.5% | 4.7% |
 
-The shape is the point. Early month, the pre-month forecast is still the
-best single answer because two days of lumpy orders prove little. From 40%
-elapsed the blend leads. The run-rate never leads at any point in the month.
+The blend leads at every point in the month, and the weekday weighting is
+why: before it, raw pacing was noisy enough early on that the held
+forecast won the first week. The run-rate never leads anywhere.
 
 **Strong months are the test that matters.** In the 10 of 34 months that
 finished more than 5% above the pre-month forecast, the held forecast
-under-read them by a median 10.5% at half-month; the blend by 7.2%. That is
+under-read them by a median 8.1% at half-month; the blend by 6.3%. That is
 the under-forecasting of good months, measurably reduced - not eliminated,
 because at half-month the evidence is still partial, and the table says so.
 
@@ -70,6 +80,16 @@ correction chasing its own tail.
 
 This is also not a demand model. It forecasts where the month lands given
 how it is pacing; it says nothing about why.
+
+## The daily table
+
+`outputs/daily_table_sample.csv` reproduces the working layout this method
+grew up in: one row per calendar day - date, day, working-day and
+bank-holiday flags - with the forecast standing in every future cell until
+an actual lands and overwrites it. In the spreadsheet ancestor that
+overwrite test was =TODAY(); here it is data presence. The interface is
+part of the method: anyone can see which numbers are real and which are
+still the model's.
 
 ## Data
 

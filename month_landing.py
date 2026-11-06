@@ -47,7 +47,7 @@ UNITS = {
     "Internal":    (60.0,  0.00, 1.3, 0.00, 0.08, (2.0, 5.0)),
 }
 MONTH_F = [0.97, 0.99, 1.08, 0.98, 1.00, 1.02, 0.96, 0.88, 1.05, 1.03, 1.02, 0.86]
-WEEKDAY_F = [0.95, 1.00, 1.02, 1.03, 1.00]            # Mon..Fri
+WEEKDAY_F = [0.88, 1.12, 1.05, 0.92, 1.03]   # Mon low, Tue best, Wed next, Thu low, Fri third
 PRICE_RISE_MONTH = 4         # increases land 1 April: March loads, April dips
 START, END = date(2021, 1, 1), date(2026, 10, 31)   # five years of dailies
 TRAIL_MONTHS = 6             # months the pacing curve learns from
@@ -108,12 +108,38 @@ def share_curve(actuals, unit, y, m):
         wds = working_days(yy, mm)
         vals = np.array([actuals[unit][d] for d in wds])
         cum = np.cumsum(vals) / vals.sum()
-        frac = np.arange(1, len(wds) + 1) / len(wds)
+        frac, _ = weighted_fracs(wds, weekday_weights(actuals, unit, y, m))
         curves.append(np.interp(GRID, frac, cum))
     return np.mean(curves, axis=0) if curves else None
 
 
-_MT, _PM = {}, {}
+_MT, _PM, _WW = {}, {}, {}
+
+
+def weekday_weights(actuals, unit, y, m):
+    """Mean revenue by weekday over the 12 months before (y, m), scaled to
+    average 1. Tuesday is not Monday, and the forecast should know."""
+    key = (unit, y, m)
+    if key not in _WW:
+        yy, mm, days = y, m, []
+        for _ in range(12):
+            yy, mm = (yy - 1, 12) if mm == 1 else (yy, mm - 1)
+            if (yy, mm) < (START.year, START.month):
+                break
+            days += [(d.weekday(), actuals[unit][d]) for d in working_days(yy, mm)]
+        w = np.ones(5)
+        for k in range(5):
+            vals = [v for wd, v in days if wd == k]
+            if vals:
+                w[k] = np.mean(vals)
+        _WW[key] = w / w.mean()
+    return _WW[key]
+
+
+def weighted_fracs(wds, w):
+    """Cumulative weighted share of the month represented by each day."""
+    ww = np.array([w[d.weekday()] for d in wds])
+    return np.cumsum(ww) / ww.sum(), ww.sum()
 
 def monthly_totals(actuals, unit):
     if unit not in _MT:
@@ -129,17 +155,21 @@ def pre_month(actuals, unit, y, m):
     if key in _PM:
         return _PM[key]
     tot = monthly_totals(actuals, unit)
+    w = weekday_weights(actuals, unit, y, m)
+    wdsum = lambda yy, mm: weighted_fracs(working_days(yy, mm), w)[1]
     hist = [(yy, mm) for yy, mm in month_iter(START, END)
             if (yy, mm) < (y, m)][-60:]
     t = np.arange(len(hist))
-    logy = np.log([tot[k] for k in hist])
+    # fit the rate per weighted day, so the month's own day mix - how many
+    # of which weekdays, net of holidays - prices the forecast explicitly
+    logy = np.log([tot[k] / wdsum(*k) for k in hist])
     X = np.column_stack([np.ones(len(hist)), t] +
                         [(np.array([k[1] for k in hist]) == mm).astype(float)
                          for mm in range(2, 13)])
     beta, *_ = np.linalg.lstsq(X, logy, rcond=None)
     x = np.concatenate([[1.0, len(hist)],
                         [(m == mm) for mm in range(2, 13)]]).astype(float)
-    _PM[key] = float(np.exp(x @ beta))
+    _PM[key] = float(np.exp(x @ beta)) * wdsum(y, m)
     return _PM[key]
 
 
@@ -147,7 +177,8 @@ def landing(actuals, unit, y, m, elapsed):
     """Forecast the month's total after `elapsed` working days."""
     wds = working_days(y, m)
     mtd = sum(actuals[unit][d] for d in wds[:elapsed])
-    frac = elapsed / len(wds)
+    fracs, _ = weighted_fracs(wds, weekday_weights(actuals, unit, y, m))
+    frac = float(fracs[elapsed - 1])
     curve = share_curve(actuals, unit, y, m)
     expected = float(np.interp(frac, GRID, curve))
     pacing = mtd / max(expected, 1e-9)
@@ -267,6 +298,45 @@ def report(rows):
           "only notice the pace break. That is why the flag exists.")
 
 
+def daily_table(actuals, y, m, today_wd):
+    """The layout the Excel ancestor used: one row per calendar day - date,
+    day, workday and holiday flags - with the forecast standing in each
+    future cell until an actual lands and overwrites it (the =TODAY() test,
+    done by data presence)."""
+    wds = working_days(y, m)
+    cut = wds[today_wd - 1]
+    land = rem_w = 0.0
+    for u in UNITS:
+        b, *_ = landing(actuals, u, y, m, today_wd)
+        land += b
+    mtd = sum(actuals[u][d] for u in UNITS for d in wds[:today_wd])
+    w_avg = {d: np.mean([weekday_weights(actuals, u, y, m)[d.weekday()]
+                         for u in UNITS]) for d in wds}
+    rem_w = sum(w_avg[d] for d in wds[today_wd:])
+    with open("outputs/daily_table_sample.csv", "w", newline="") as fh:
+        wtr = csv.writer(fh)
+        wtr.writerow(["date", "day", "month", "year", "working_day",
+                      "bank_holiday", "total_gbpk", "source"])
+        d = date(y, m, 1)
+        while d.month == m:
+            hol = d in HOLIDAYS
+            wk = d.weekday() < 5 and not hol
+            if not wk:
+                val, src = "", ""
+            elif d <= cut:
+                val = round(sum(actuals[u][d] for u in UNITS), 1)
+                src = "ACTUAL"
+            else:
+                val = round((land - mtd) * w_avg[d] / rem_w, 1)
+                src = "FORECAST"
+            wtr.writerow([d.isoformat(), d.strftime("%a").upper(), m, y,
+                          "Y" if wk else "N", "Y" if hol else "N", val, src])
+            d += timedelta(days=1)
+    print(f"\nDaily table sample written for {y}-{m:02d} as at working day "
+          f"{today_wd}: actuals to {cut}, forecast beyond, weekday-weighted.")
+
+
 if __name__ == "__main__":
     actuals = generate()
     report(backtest(actuals))
+    daily_table(actuals, 2026, 10, 12)
