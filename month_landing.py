@@ -28,8 +28,10 @@ import matplotlib.pyplot as plt
 BG, INK, MUTED, LINE = "#fcfbf9", "#1c2430", "#5b6673", "#e4e0d8"
 ACCENT, SECOND, THIRD = "#2a6f6a", "#b0543f", "#8a7f10"
 
-# England bank holidays, 2023-2026.
+# England bank holidays, 2021-2026.
 HOLIDAYS = {d for d in map(date.fromisoformat, """
+2021-01-01 2021-04-02 2021-04-05 2021-05-03 2021-05-31 2021-08-30 2021-12-27 2021-12-28
+2022-01-03 2022-04-15 2022-04-18 2022-05-02 2022-06-02 2022-06-03 2022-08-29 2022-09-19 2022-12-26 2022-12-27
 2023-01-02 2023-04-07 2023-04-10 2023-05-01 2023-05-08 2023-05-29 2023-08-28 2023-12-25 2023-12-26
 2024-01-01 2024-03-29 2024-04-01 2024-05-06 2024-05-27 2024-08-26 2024-12-25 2024-12-26
 2025-01-01 2025-04-18 2025-04-21 2025-05-05 2025-05-26 2025-08-25 2025-12-25 2025-12-26
@@ -37,16 +39,17 @@ HOLIDAYS = {d for d in map(date.fromisoformat, """
 """.split())}
 
 UNITS = {
-    # name: (base daily £k, annual growth, month-end loading, pull-forward share)
-    "Core parts":  (420.0, 0.05, 0.9, 0.12),
-    "Accessories": (150.0, 0.08, 0.5, 0.04),
-    "Service":     (95.0,  0.03, 0.2, 0.00),
-    "Internal":    (60.0,  0.00, 1.3, 0.00),
+    # name: (base daily GBPk, annual growth, month-end loading,
+    #        pull-forward share, lumpiness: P(large order), its size range)
+    "Core parts":  (420.0, 0.05, 0.9, 0.12, 0.05, (1.8, 4.0)),
+    "Accessories": (150.0, 0.08, 0.5, 0.04, 0.03, (1.5, 2.5)),
+    "Service":     (95.0,  0.03, 0.2, 0.00, 0.01, (1.3, 1.8)),
+    "Internal":    (60.0,  0.00, 1.3, 0.00, 0.08, (2.0, 5.0)),
 }
 MONTH_F = [0.97, 0.99, 1.08, 0.98, 1.00, 1.02, 0.96, 0.88, 1.05, 1.03, 1.02, 0.86]
 WEEKDAY_F = [0.95, 1.00, 1.02, 1.03, 1.00]            # Mon..Fri
 PRICE_RISE_MONTH = 4         # increases land 1 April: March loads, April dips
-START, END = date(2023, 1, 1), date(2026, 10, 31)
+START, END = date(2021, 1, 1), date(2026, 10, 31)   # five years of dailies
 TRAIL_MONTHS = 6             # months the pacing curve learns from
 GRID = np.linspace(0.05, 1.0, 20)                     # share curve sample points
 
@@ -71,7 +74,7 @@ def generate():
     """Daily actuals per unit with known effects. Returns {unit: {date: £k}}."""
     rng = random.Random(7)
     out = {u: {} for u in UNITS}
-    for u, (base, growth, loading, pull) in UNITS.items():
+    for u, (base, growth, loading, pull, p_lump, lump) in UNITS.items():
         for y, m in month_iter(START, END):
             wds = working_days(y, m)
             n = len(wds)
@@ -87,7 +90,10 @@ def generate():
                         level *= 1 + pull * 4          # March loads up
                     if m == PRICE_RISE_MONTH and pos < 0.3:
                         level *= 1 - pull * 2          # April starts hollow
-                out[u][d] = level * rng.lognormvariate(0, 0.06)
+                level *= rng.lognormvariate(0, 0.10)
+                if rng.random() < p_lump:              # a large order lands
+                    level *= rng.uniform(*lump)
+                out[u][d] = level
     return out
 
 
@@ -107,6 +113,36 @@ def share_curve(actuals, unit, y, m):
     return np.mean(curves, axis=0) if curves else None
 
 
+_MT, _PM = {}, {}
+
+def monthly_totals(actuals, unit):
+    if unit not in _MT:
+        _MT[unit] = {(y, m): sum(actuals[unit][d] for d in working_days(y, m))
+                     for y, m in month_iter(START, END)}
+    return _MT[unit]
+
+
+def pre_month(actuals, unit, y, m):
+    """The forecast made before the month starts: log-linear trend plus
+    month-of-year factors, fitted on up to five years of completed months."""
+    key = (unit, y, m)
+    if key in _PM:
+        return _PM[key]
+    tot = monthly_totals(actuals, unit)
+    hist = [(yy, mm) for yy, mm in month_iter(START, END)
+            if (yy, mm) < (y, m)][-60:]
+    t = np.arange(len(hist))
+    logy = np.log([tot[k] for k in hist])
+    X = np.column_stack([np.ones(len(hist)), t] +
+                        [(np.array([k[1] for k in hist]) == mm).astype(float)
+                         for mm in range(2, 13)])
+    beta, *_ = np.linalg.lstsq(X, logy, rcond=None)
+    x = np.concatenate([[1.0, len(hist)],
+                        [(m == mm) for mm in range(2, 13)]]).astype(float)
+    _PM[key] = float(np.exp(x @ beta))
+    return _PM[key]
+
+
 def landing(actuals, unit, y, m, elapsed):
     """Forecast the month's total after `elapsed` working days."""
     wds = working_days(y, m)
@@ -114,7 +150,14 @@ def landing(actuals, unit, y, m, elapsed):
     frac = elapsed / len(wds)
     curve = share_curve(actuals, unit, y, m)
     expected = float(np.interp(frac, GRID, curve))
-    return mtd / max(expected, 1e-9), mtd / frac       # profiled, naive run-rate
+    pacing = mtd / max(expected, 1e-9)
+    prior = pre_month(actuals, unit, y, m)
+    # credibility blend: weight the pacing evidence by the share of the
+    # month it has actually seen. Early days lean on the pre-month
+    # forecast; a month pacing strong lifts the full-month number instead
+    # of being under-called.
+    blend = expected * pacing + (1 - expected) * prior
+    return blend, pacing, mtd / frac, prior
 
 
 def backtest(actuals):
@@ -124,16 +167,17 @@ def backtest(actuals):
         wds = working_days(y, m)
         total = sum(actuals[u][d] for u in UNITS for d in wds)
         yy, mm = (y - 1, 12) if m == 1 else (y, m - 1)
-        prior = sum(actuals[u][d] for u in UNITS for d in working_days(yy, mm))
+        held = sum(pre_month(actuals, u, y, m) for u in UNITS)
         for e in range(2, len(wds) + 1):
-            prof = run = 0.0
+            bl = prof = run = 0.0
             for u in UNITS:
-                p, r = landing(actuals, u, y, m, e)
+                b, p, r, _ = landing(actuals, u, y, m, e)
+                bl += b
                 prof += p
                 run += r
             rows.append({"year": y, "month": m, "elapsed": e, "of": len(wds),
-                         "frac": e / len(wds), "actual": total,
-                         "profiled": prof, "runrate": run, "prior": prior})
+                         "frac": e / len(wds), "actual": total, "blend": bl,
+                         "profiled": prof, "runrate": run, "prior": held})
     return rows
 
 
@@ -146,8 +190,9 @@ def report(rows):
         if not sub:
             continue
         med = lambda k: float(np.median([ape(r[k], r["actual"]) for r in sub]))
-        funnel.append({"elapsed": f"{int(hi*100)}%", "profiled": med("profiled"),
-                       "runrate": med("runrate"), "prior": med("prior")})
+        funnel.append({"elapsed": f"{int(hi*100)}%", "blend": med("blend"),
+                       "profiled": med("profiled"), "runrate": med("runrate"),
+                       "prior": med("prior")})
 
     with open("outputs/backtest_funnel.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=funnel[0].keys())
@@ -160,9 +205,10 @@ def report(rows):
     for side in ("top", "right"):
         ax.spines[side].set_visible(False)
     xs = range(len(funnel))
-    for key, colour, label in (("prior", MUTED, "Prior month as forecast"),
+    for key, colour, label in (("prior", MUTED, "Pre-month forecast, held"),
                                ("runrate", SECOND, "Naive run-rate"),
-                               ("profiled", ACCENT, "Profiled pacing")):
+                               ("profiled", THIRD, "Pacing alone"),
+                               ("blend", ACCENT, "Blend")):
         ys = [f[key] for f in funnel]
         ax.plot(xs, ys, color=colour, linewidth=1.8)
         ax.annotate(f"{label} {ys[-1]:.1f}%", xy=(len(funnel) - 1, ys[-1]),
@@ -192,10 +238,26 @@ def report(rows):
     flagged.sort(key=lambda x: -x[2])
 
     print("MONTH LANDING FORECAST - walk-forward backtest")
-    print(f"{'elapsed':>8s} {'profiled':>9s} {'run-rate':>9s} {'prior mo':>9s}")
+    print(f"{'elapsed':>8s} {'blend':>8s} {'pacing':>8s} {'run-rate':>9s} {'held fc':>8s}")
     for f in funnel:
-        print(f"{f['elapsed']:>8s} {f['profiled']:>8.1f}% {f['runrate']:>8.1f}% "
-              f"{f['prior']:>8.1f}%")
+        print(f"{f['elapsed']:>8s} {f['blend']:>7.1f}% {f['profiled']:>7.1f}% "
+              f"{f['runrate']:>8.1f}% {f['prior']:>7.1f}%")
+
+    # his sentence, demonstrated: strong months must not be under-called
+    strong = {(r["year"], r["month"]) for r in rows
+              if r["actual"] > r["prior"] * 1.05}
+    at = lambda k, ym: next(r[k] / r["actual"] - 1 for r in rows
+                            if (r["year"], r["month"]) == ym
+                            and abs(r["frac"] - 0.5) ==
+                            min(abs(q["frac"] - 0.5) for q in rows
+                                if (q["year"], q["month"]) == ym))
+    if strong:
+        h = float(np.median([at("prior", ym) for ym in strong])) * 100
+        b = float(np.median([at("blend", ym) for ym in strong])) * 100
+        print(f"\nStrong months (actual >5% above the pre-month forecast): "
+              f"{len(strong)} of 34.")
+        print(f"At half-month, the held forecast under-reads them by "
+              f"{h:+.1f}%; the blend by {b:+.1f}%.")
     print("\nMonths mis-read at 40% elapsed (profiled APE > 8%):")
     for y, m, e in flagged:
         tag = " <- price-rise pull-forward" if m in (PRICE_RISE_MONTH - 1,
